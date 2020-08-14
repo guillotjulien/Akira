@@ -4,7 +4,6 @@ project('com.github.akiraux.akira', 'vala', 'c')
 akira_prefix = get_option('prefix')
 akira_datadir = join_paths(akira_prefix, get_option('datadir'))
 akira_pkgdatadir = join_paths(akira_datadir, meson.project_name())
-install_tests = get_option('install-tests')
 
 vala_version = meson.get_compiler('vala').version()
 if vala_version.version_compare('<=0.43.90')
@@ -68,9 +67,6 @@ add_global_arguments(['-DG_LOG_DOMAIN="Akira"'], language:'c')
 subdir('src')
 subdir('data')
 subdir('po')
-
-if install_tests
-    subdir('tests')
-endif
+subdir('tests')
 
 meson.add_install_script('build-aux/meson/post_install.py')
