@@ -53,6 +53,7 @@ public class Akira.Partials.InputField : Gtk.EventBox {
     }
 
     construct {
+        //  window = get_toplevel () as Akira.Window;
         valign = Gtk.Align.CENTER;
 
         entry = new Gtk.SpinButton.with_range (0, 100, step);
