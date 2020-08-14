@@ -704,7 +704,6 @@ public class Akira.Layouts.Partials.Layer : Gtk.ListBoxRow {
             }
 
             window.event_bus.set_focus_on_canvas ();
-            window.event_bus.file_edited ();
         });
     }
 
@@ -739,9 +738,6 @@ public class Akira.Layouts.Partials.Layer : Gtk.ListBoxRow {
 
             icon_hidden.visible = ! active;
             icon_hidden.no_show_all = active;
-
-            window.event_bus.set_focus_on_canvas ();
-            window.event_bus.file_edited ();
         });
     }
 
