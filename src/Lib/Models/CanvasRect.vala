@@ -123,7 +123,7 @@ public class Akira.Lib.Models.CanvasRect : Goo.CanvasRect, Models.CanvasItem {
         is_radius_uniform = true;
         is_radius_autoscale = false;
 
-        init_position (_x, _y);
+        position_item (_x, _y);
 
         color = _fill_color;
         has_border = settings.set_border;

@@ -471,6 +471,7 @@ public class Akira.Lib.Managers.ItemsManager : Object {
         }
 
         restore_attributes (item, artboard, obj);
+        restore_selection (obj.get_boolean_member ("selected"), item);
     }
 
     /*
@@ -575,6 +576,18 @@ public class Akira.Lib.Managers.ItemsManager : Object {
     }
 
     /**
+     * Restore the selected status of an object.
+     *
+     * @param bool selected - If the object is selected.
+     * @param Models.CanvasItem item - The newly created item.
+     */
+    private void restore_selection (bool selected, Models.CanvasItem item) {
+        if (selected) {
+            window.main_window.main_canvas.canvas.selected_bound_manager.add_item_to_selection (item);
+        }
+    }
+
+    /**
      * Handle the aftermath of an item transformation, like size changes or movement.
      */
     private void on_hold_released () {
@@ -644,8 +657,8 @@ public class Akira.Lib.Managers.ItemsManager : Object {
         }
 
         // Save the coordinates before removing the item.
-        var x = item.bounds_manager.bounds.x1;
-        var y = item.bounds_manager.bounds.y1;
+        var x = item.get_global_coord ("x");
+        var y = item.get_global_coord ("y");
 
         // If the item was moved from inside an Artboard to the emtpy Canvas.
         if (item.artboard != null && new_artboard == null) {

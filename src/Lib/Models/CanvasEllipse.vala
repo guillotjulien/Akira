@@ -109,7 +109,7 @@ public class Akira.Lib.Models.CanvasEllipse : Goo.CanvasEllipse, Models.CanvasIt
 
         set_transform (Cairo.Matrix.identity ());
 
-        init_position (_center_x, _center_y);
+        position_item (_center_x, _center_y);
 
         color = _fill_color;
         has_border = settings.set_border;
