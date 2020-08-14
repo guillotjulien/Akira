@@ -32,12 +32,13 @@ public class Akira.Utils.AffineTransform : Object {
 
     public static HashTable<string, double?> get_position (CanvasItem item) {
         HashTable<string, double?> array = new HashTable<string, double?> (str_hash, str_equal);
-        double item_x = item.bounds.x1;
-        double item_y = item.bounds.y1;
+        double item_x = item.get_coords ("x");
+        double item_y = item.get_coords ("y");
 
         // debug (@"item x: $(item_x) y: $(item_y)");
-        // debug (@"item x: $(item.bounds.x1) y: $(item.bounds.y1)");
         // debug (@"Item has artboard: $(item.artboard != null)");
+
+        item.canvas.convert_from_item_space (item, ref item_x, ref item_y);
 
         if (item.artboard != null) {
             item_x = item.relative_x;
@@ -52,23 +53,25 @@ public class Akira.Utils.AffineTransform : Object {
 
     public static void set_position (CanvasItem item, double? x = null, double? y = null) {
         if (item.artboard != null) {
+            var delta_x = x != null ? x - item.relative_x : 0.0;
+            var delta_y = y != null ? y - item.relative_y : 0.0;
+
             item.relative_x = x != null ? x : item.relative_x;
             item.relative_y = y != null ? y : item.relative_y;
+
+            item.translate (delta_x, delta_y);
+
             return;
         }
 
         Cairo.Matrix matrix;
         item.get_transform (out matrix);
 
-        // Account for the item rotation and get the difference between
-        // its bounds and matrix coordinates.
-        var diff_x = item.bounds.x1 - matrix.x0;
-        var diff_y = item.bounds.y1 - matrix.y0;
+        double new_x = (x != null) ? x : matrix.x0;
+        double new_y = (y != null) ? y : matrix.y0;
 
-        matrix.x0 = (x != null) ? x - diff_x : matrix.x0;
-        matrix.y0 = (y != null) ? y - diff_y : matrix.y0;
-
-        item.set_transform (matrix);
+        var new_matrix = Cairo.Matrix (matrix.xx, matrix.yx, matrix.xy, matrix.yy, new_x, new_y);
+        item.set_transform (new_matrix);
     }
 
     /**
@@ -81,21 +84,26 @@ public class Akira.Utils.AffineTransform : Object {
         ref double initial_event_x,
         ref double initial_event_y
     ) {
+        Cairo.Matrix matrix;
 
         var delta_x = event_x - initial_event_x;
         var delta_y = event_y - initial_event_y;
 
         if (item.artboard != null) {
+            item.artboard.get_transform (out matrix);
+
             item.relative_x += delta_x;
             item.relative_y += delta_y;
+
+            item.translate (delta_x, delta_y);
         } else {
-            Cairo.Matrix matrix;
             item.get_transform (out matrix);
 
-            matrix.x0 += delta_x;
-            matrix.y0 += delta_y;
-
-            item.set_transform (matrix);
+            var new_matrix = Cairo.Matrix (
+                matrix.xx, matrix.yx, matrix.xy, matrix.yy,
+                (matrix.x0 + delta_x), (matrix.y0 + delta_y)
+            );
+            item.set_transform (new_matrix);
         }
 
         initial_event_x = event_x;
@@ -136,28 +144,44 @@ public class Akira.Utils.AffineTransform : Object {
                 new_height = -delta_y;
                 new_width = -delta_x;
 
-                fix_height_origin (
-                    ref delta_y,
-                    ref event_y,
-                    ref item_y,
-                    ref item_height,
-                    ref new_y,
-                    ref new_height
-                );
+                // Height size constraints.
+                if (fix_size (event_y) > item_y + item_height && item_height != 1) {
+                    // If the mouse event goes beyond the available height of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_y = item_height - 1;
+                    new_height = -item_height + 1;
+                } else if (fix_size (event_y) > item_y + item_height) {
+                    // If the user keeps moving the mouse beyond the available height of the item
+                    // prevent any size changes.
+                    new_y = 0;
+                    new_height = 0;
+                } else if (item_height == 1 && delta_y >= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving down.
+                    new_y = 0;
+                    new_height = 0;
+                }
 
-                fix_width_origin (
-                    ref delta_x,
-                    ref event_x,
-                    ref item_x,
-                    ref item_width,
-                    ref new_x,
-                    ref new_width
-                );
+                // Width size constraints.
+                if (fix_size (event_x) > item_x + item_width && item_width != 1) {
+                    // If the mouse event goes beyond the available width of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_x = item_width - 1;
+                    new_width = -item_width + 1;
+                } else if (fix_size (event_x) > item_x + item_width) {
+                    // If the user keeps moving the mouse beyond the available width of the item
+                    // prevent any size changes.
+                    new_x = 0;
+                    new_width = 0;
+                } else if (item_width == 1 && delta_x >= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving right.
+                    new_x = 0;
+                    new_width = 0;
+                }
 
                 if (canvas.ctrl_is_pressed || item.size_locked) {
                     new_width = new_height * item.size_ratio;
-                    new_x = -new_width;
-                    new_y = -new_height;
                 }
                 break;
 
@@ -165,18 +189,26 @@ public class Akira.Utils.AffineTransform : Object {
                 new_y = delta_y;
                 new_height = -delta_y;
 
-                fix_height_origin (
-                    ref delta_y,
-                    ref event_y,
-                    ref item_y,
-                    ref item_height,
-                    ref new_y,
-                    ref new_height
-                );
+                // Height size constraints.
+                if (fix_size (event_y) > item_y + item_height && item_height != 1) {
+                    // If the mouse event goes beyond the available height of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_y = item_height - 1;
+                    new_height = -item_height + 1;
+                } else if (fix_size (event_y) > item_y + item_height) {
+                    // If the user keeps moving the mouse beyond the available height of the item
+                    // prevent any size changes.
+                    new_y = 0;
+                    new_height = 0;
+                } else if (item_height == 1 && delta_y >= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving down.
+                    new_y = 0;
+                    new_height = 0;
+                }
 
                 if (canvas.ctrl_is_pressed || item.size_locked) {
                     new_width = new_height * item.size_ratio;
-                    new_x = - (new_width / 2);
                 }
                 break;
 
@@ -185,31 +217,64 @@ public class Akira.Utils.AffineTransform : Object {
                 new_height = -delta_y;
                 new_width = delta_x;
 
-                fix_height_origin (
-                    ref delta_y,
-                    ref event_y,
-                    ref item_y,
-                    ref item_height,
-                    ref new_y,
-                    ref new_height
-                );
+                // Height size constraints.
+                if (fix_size (event_y) > item_y + item_height && item_height != 1) {
+                    // If the mouse event goes beyond the available height of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_y = item_height - 1;
+                    new_height = -item_height + 1;
+                } else if (fix_size (event_y) > item_y + item_height) {
+                    // If the user keeps moving the mouse beyond the available height of the item
+                    // prevent any size changes.
+                    new_y = 0;
+                    new_height = 0;
+                } else if (item_height == 1 && delta_y >= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving down.
+                    new_y = 0;
+                    new_height = 0;
+                }
 
-                fix_width (ref delta_x, ref event_x, ref item_x, ref item_width, ref new_width);
+                // Width size constraints.
+                if (fix_size (event_x) < item_x && item_width != 1) {
+                    // If the mouse event goes beyond the available width of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_width = -item_width + 1;
+                } else if (fix_size (event_x) < item_x) {
+                    // If the user keeps moving the mouse beyond the available width of the item
+                    // prevent any size changes.
+                    new_width = 0;
+                } else if (item_width == 1 && delta_x <= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving left.
+                    new_width = 0;
+                }
 
                 if (canvas.ctrl_is_pressed || item.size_locked) {
                     new_height = new_width / item.size_ratio;
-                    new_y = -new_height;
                 }
                 break;
 
             case NobManager.Nob.RIGHT_CENTER:
                 new_width = delta_x;
 
-                fix_width (ref delta_x, ref event_x, ref item_x, ref item_width, ref new_width);
+                // Width size constraints.
+                if (fix_size (event_x) < item_x && item_width != 1) {
+                    // If the mouse event goes beyond the available width of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_width = -item_width + 1;
+                } else if (fix_size (event_x) < item_x) {
+                    // If the user keeps moving the mouse beyond the available width of the item
+                    // prevent any size changes.
+                    new_width = 0;
+                } else if (item_width == 1 && delta_x <= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving left.
+                    new_width = 0;
+                }
 
                 if (canvas.ctrl_is_pressed || item.size_locked) {
                     new_height = new_width / item.size_ratio;
-                    new_y = - (new_height / 2);
                 }
                 break;
 
@@ -217,9 +282,35 @@ public class Akira.Utils.AffineTransform : Object {
                 new_width = delta_x;
                 new_height = delta_y;
 
-                fix_width (ref delta_x, ref event_x, ref item_x, ref item_width, ref new_width);
+                // Width size constraints.
+                if (fix_size (event_x) < item_x && item_width != 1) {
+                    // If the mouse event goes beyond the available width of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_width = -item_width + 1;
+                } else if (fix_size (event_x) < item_x) {
+                    // If the user keeps moving the mouse beyond the available width of the item
+                    // prevent any size changes.
+                    new_width = 0;
+                } else if (item_width == 1 && delta_x <= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving left.
+                    new_width = 0;
+                }
 
-                fix_height (ref delta_y, ref event_y, ref item_y, ref item_height, ref new_height);
+                // Height size constraints.
+                if (fix_size (event_y) < item_y && item_height != 1) {
+                    // If the mouse event goes beyond the available height of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_height = -item_height + 1;
+                } else if (fix_size (event_y) < item_y) {
+                    // If the user keeps moving the mouse beyond the available height of the item
+                    // prevent any size changes.
+                    new_height = 0;
+                } else if (item_height == 1 && delta_y <= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving down.
+                    new_height = 0;
+                }
 
                 if (canvas.ctrl_is_pressed || item.size_locked) {
                     new_height = new_width / item.size_ratio;
@@ -232,11 +323,23 @@ public class Akira.Utils.AffineTransform : Object {
             case NobManager.Nob.BOTTOM_CENTER:
                 new_height = delta_y;
 
-                fix_height (ref delta_y, ref event_y, ref item_y, ref item_height, ref new_height);
+                // Height size constraints.
+                if (fix_size (event_y) < item_y && item_height != 1) {
+                    // If the mouse event goes beyond the available height of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_height = -item_height + 1;
+                } else if (fix_size (event_y) < item_y) {
+                    // If the user keeps moving the mouse beyond the available height of the item
+                    // prevent any size changes.
+                    new_height = 0;
+                } else if (item_height == 1 && delta_y <= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving down.
+                    new_height = 0;
+                }
 
                 if (canvas.ctrl_is_pressed || item.size_locked) {
                     new_width = new_height * item.size_ratio;
-                    new_x = - (new_width / 2);
                 }
                 break;
 
@@ -245,20 +348,41 @@ public class Akira.Utils.AffineTransform : Object {
                 new_width = -delta_x;
                 new_height = delta_y;
 
-                fix_width_origin (
-                    ref delta_x,
-                    ref event_x,
-                    ref item_x,
-                    ref item_width,
-                    ref new_x,
-                    ref new_width
-                );
+                // Width size contraints.
+                if (fix_size (event_x) > item_x + item_width && item_width != 1) {
+                    // If the mouse event goes beyond the available width of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_x = item_width - 1;
+                    new_width = -item_width + 1;
+                } else if (fix_size (event_x) > item_x + item_width) {
+                    // If the user keeps moving the mouse beyond the available width of the item
+                    // prevent any size changes.
+                    new_x = 0;
+                    new_width = 0;
+                } else if (item_width == 1 && delta_x >= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving right.
+                    new_x = 0;
+                    new_width = 0;
+                }
 
-                fix_height (ref delta_y, ref event_y, ref item_y, ref item_height, ref new_height);
+                // Height size constraints.
+                if (fix_size (event_y) < item_y && item_height != 1) {
+                    // If the mouse event goes beyond the available height of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_height = -item_height + 1;
+                } else if (fix_size (event_y) < item_y) {
+                    // If the user keeps moving the mouse beyond the available height of the item
+                    // prevent any size changes.
+                    new_height = 0;
+                } else if (item_height == 1 && delta_y <= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving down.
+                    new_height = 0;
+                }
 
                 if (canvas.ctrl_is_pressed || item.size_locked) {
                     new_width = new_height * item.size_ratio;
-                    new_x = -new_width;
                 }
                 break;
 
@@ -266,18 +390,26 @@ public class Akira.Utils.AffineTransform : Object {
                 new_x = delta_x;
                 new_width = -delta_x;
 
-                fix_width_origin (
-                    ref delta_x,
-                    ref event_x,
-                    ref item_x,
-                    ref item_width,
-                    ref new_x,
-                    ref new_width
-                );
+                // Width size constraints.
+                if (fix_size (event_x) > item_x + item_width && item_width != 1) {
+                    // If the mouse event goes beyond the available width of the item
+                    // super quickly, collapse the size to 1 and maintain the position.
+                    new_x = item_width - 1;
+                    new_width = -item_width + 1;
+                } else if (fix_size (event_x) > item_x + item_width) {
+                    // If the user keeps moving the mouse beyond the available width of the item
+                    // prevent any size changes.
+                    new_x = 0;
+                    new_width = 0;
+                } else if (item_width == 1 && delta_x >= 0) {
+                    // Don't update the size or position if the delta keeps increasing,
+                    // meaning the user is still moving right.
+                    new_x = 0;
+                    new_width = 0;
+                }
 
                 if (canvas.ctrl_is_pressed || item.size_locked) {
                     new_height = new_width * item.size_ratio;
-                    new_y = - (new_height / 2);
                 }
                 break;
         }
@@ -288,106 +420,6 @@ public class Akira.Utils.AffineTransform : Object {
 
         item.move (new_x, new_y);
         set_size (item, new_width, new_height);
-    }
-
-    // Width size constraints.
-    private static void fix_width (
-        ref double delta_x,
-        ref double event_x,
-        ref double item_x,
-        ref double item_width,
-        ref double new_width
-    ) {
-        if (fix_size (event_x) < item_x && item_width != 1) {
-            // If the mouse event goes beyond the available width of the item
-            // super quickly, collapse the size to 1 and maintain the position.
-            new_width = -item_width + 1;
-        } else if (fix_size (event_x) < item_x) {
-            // If the user keeps moving the mouse beyond the available width of the item
-            // prevent any size changes.
-            new_width = 0;
-        } else if (item_width == 1 && delta_x <= 0) {
-            // Don't update the size or position if the delta keeps increasing,
-            // meaning the user is still moving left.
-            new_width = 0;
-        }
-    }
-
-    // Width size constraints and origin point.
-    private static void fix_width_origin (
-        ref double delta_x,
-        ref double event_x,
-        ref double item_x,
-        ref double item_width,
-        ref double new_x,
-        ref double new_width
-    ) {
-        if (fix_size (event_x) > item_x + item_width && item_width != 1) {
-            // If the mouse event goes beyond the available width of the item
-            // super quickly, collapse the size to 1 and maintain the position.
-            new_x = item_width - 1;
-            new_width = -item_width + 1;
-        } else if (fix_size (event_x) > item_x + item_width) {
-            // If the user keeps moving the mouse beyond the available width of the item
-            // prevent any size changes.
-            new_x = 0;
-            new_width = 0;
-        } else if (item_width == 1 && delta_x >= 0) {
-            // Don't update the size or position if the delta keeps increasing,
-            // meaning the user is still moving right.
-            new_x = 0;
-            new_width = 0;
-        }
-    }
-
-    // Height size constraints.
-    private static void fix_height (
-        ref double delta_y,
-        ref double event_y,
-        ref double item_y,
-        ref double item_height,
-        ref double new_height
-    ) {
-        if (fix_size (event_y) < item_y && item_height != 1) {
-            // If the mouse event goes beyond the available height of the item
-            // super quickly, collapse the size to 1 and maintain the position.
-            new_height = -item_height + 1;
-        } else if (fix_size (event_y) < item_y) {
-            // If the user keeps moving the mouse beyond the available height of the item
-            // prevent any size changes.
-            new_height = 0;
-        } else if (item_height == 1 && delta_y <= 0) {
-            // Don't update the size or position if the delta keeps increasing,
-            // meaning the user is still moving down.
-            new_height = 0;
-        }
-    }
-
-    // Height size constraints and origin point.
-    private static void fix_height_origin (
-        ref double delta_y,
-        ref double event_y,
-        ref double item_y,
-        ref double item_height,
-        ref double new_y,
-        ref double new_height
-    ) {
-        if (fix_size (event_y) > item_y + item_height && item_height != 1) {
-            // If the mouse event goes beyond the available height of the item
-            // super quickly, collapse the size to 1 and maintain the position.
-            new_y = item_height - 1;
-            new_height = -item_height + 1;
-        } else if (fix_size (event_y) > item_y + item_height) {
-            // If the user keeps moving the mouse beyond the available height of the item
-            // prevent any size changes.
-            new_y = 0;
-            new_height = 0;
-        } else if (item_height == 1 && delta_y >= 0) {
-            // Don't update the size or position if the delta keeps increasing,
-            // meaning the user is still moving down.
-            new_y = 0;
-            new_height = 0;
-        }
     }
 
     public static void rotate_from_event (
@@ -459,7 +491,7 @@ public class Akira.Utils.AffineTransform : Object {
             rotation = GLib.Math.round (rotation);
             // Cap new_rotation to the [0, 360] range
             var new_rotation = GLib.Math.fmod (item.rotation + rotation, 360);
-            set_rotation (item, new_rotation);
+            set_rotation (new_rotation, item);
             canvas.convert_to_item_space (item, ref initial_x, ref initial_y);
         }
 
@@ -481,29 +513,39 @@ public class Akira.Utils.AffineTransform : Object {
         }
     }
 
-    public static void set_rotation (CanvasItem item, double rotation) {
+    public static void set_rotation (double rotation, CanvasItem item) {
         var center_x = item.get_coords ("width") / 2;
         var center_y = item.get_coords ("height") / 2;
+
         var actual_rotation = rotation - item.rotation;
 
         item.rotate (actual_rotation, center_x, center_y);
+
         item.rotation += actual_rotation;
     }
 
-    public static void flip_item (CanvasItem item, double sx, double sy) {
-        double x, y, width, height;
-        item.get ("x", out x, "y", out y, "width", out width, "height", out height);
-        var center_x = x + width / 2;
-        var center_y = y + height / 2;
+    public static void flip_item (bool clicked, CanvasItem item, double sx, double sy) {
+        if (clicked) {
+            double x, y, width, height;
+            item.get ("x", out x, "y", out y, "width", out width, "height", out height);
+            var center_x = x + width / 2;
+            var center_y = y + height / 2;
+
+            var transform = Cairo.Matrix.identity ();
+            item.get_transform (out transform);
+            double radians = item.rotation * (Math.PI / 180);
+            transform.translate (center_x, center_y);
+            transform.rotate (-radians);
+            transform.scale (sx, sy);
+            transform.rotate (radians);
+            transform.translate (-center_x, -center_y);
+            item.set_transform (transform);
+            return;
+        }
 
         var transform = Cairo.Matrix.identity ();
         item.get_transform (out transform);
-        double radians = item.rotation * (Math.PI / 180);
-        transform.translate (center_x, center_y);
-        transform.rotate (-radians);
         transform.scale (sx, sy);
-        transform.rotate (radians);
-        transform.translate (-center_x, -center_y);
         item.set_transform (transform);
     }
 
