@@ -134,6 +134,9 @@ public class Akira.Lib.Models.CanvasRect : Goo.CanvasRect, Models.CanvasItem {
         }
 
         reset_colors ();
+
+        // Create the GhostBoundsManager to keep track of the global canvas bounds.
+        bounds_manager = new Managers.GhostBoundsManager (this);
     }
 
     public void update_border () {

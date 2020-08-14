@@ -151,13 +151,11 @@ public class Akira.Lib.Canvas : Goo.Canvas {
             case Gdk.Key.Control_L:
             case Gdk.Key.Control_R:
                 ctrl_is_pressed = true;
-                toggle_item_ghost (false);
                 break;
 
             case Gdk.Key.Alt_L:
             case Gdk.Key.Alt_R:
-                // Show the ghost item only if the CTRL button is not pressed.
-                toggle_item_ghost (!ctrl_is_pressed);
+                toggle_item_ghost (true);
                 break;
 
             case Gdk.Key.Up:
